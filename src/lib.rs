@@ -2,12 +2,12 @@
 
 
 use frame_support::{
-	codec::{Decode, Encode},
+	// codec::{Decode, Encode},
 	decl_event, decl_module, decl_storage,
 	dispatch::DispatchResult,
 };
 use frame_system::{self as system, ensure_signed, ensure_root};
-use sp_runtime::RuntimeDebug;
+//use sp_runtime::RuntimeDebug;
 use sp_std::prelude::*;
 
 
@@ -22,24 +22,14 @@ type AccountIdOf<T> = <T as system::Trait>::AccountId;
 // type PersonalInformationOf<T> = PairInfo<AccountIdOf<T>, <T as system::Trait>::BlockNumber>;
 
 
-#[derive(Encode, Decode, Clone, Default, RuntimeDebug)]
-pub struct PersonalInformation {
-	name: Vec<u8>,
-	phone: Vec<u8>,
-	email: Vec<u8>,
-	address: Vec<u8>,
-	income: Vec<u8>,
-	nric: Vec<u8>,
-	passport: Vec<u8>,
-	verified: bool
-}
 
 
 decl_storage! {
 	trait Store for Module<T: Trait> as KYCStore {
 		pub Level get(fn level): map hasher(blake2_128_concat) AccountIdOf<T> => u8;
-		pub Checker get(fn checker): map hasher(blake2_128_concat) AccountIdOf<T> => bool;
-		pub User get(fn user): map hasher(blake2_128_concat) AccountIdOf<T> => Option<PersonalInformation>;
+		pub IsChecker get(fn is_checker): map hasher(blake2_128_concat) AccountIdOf<T> => bool;
+		pub Checkers get(fn checkers): Vec<AccountIdOf<T>>;
+		pub IsUser get(fn checker): map hasher(blake2_128_concat) AccountIdOf<T> => bool;
 		pub Users get(fn users): Vec<AccountIdOf<T>>;
 	}
 }
@@ -49,12 +39,17 @@ decl_event! (
 	where
 	<T as system::Trait>::AccountId,
 	{
-		/// Checker added. \[accountId\]
+		/// User added. \[User Account ID\]
+		UserAdded(AccountId),
+		/// User verified. \[User Account ID, Level of Verification\]
+		UserVerified(AccountId, u8),					
+		/// Checker added. \[Checker Account ID\]
 		CheckerAdded(AccountId),
-		/// Checker removed. \[accountId\]
+		/// Checker removed. \[Chcker Account ID\]
 		CheckerRemoved(AccountId),
 	}
 );
+
 
 decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
@@ -62,77 +57,92 @@ decl_module! {
 
 
 		#[weight = 10_000]
-		fn update_information(origin, 
-			name:Vec<u8>, 
-			phone:Vec<u8>, 
-			email:Vec<u8>, 
-			address:Vec<u8>, 
-			income:Vec<u8>, 
-			nric:Vec<u8>, 
-			passport:Vec<u8>) -> DispatchResult {
-			let caller = ensure_signed(origin)?;
-			let salah: bool = false;
-			let thing = PersonalInformation {
-				name: name, 
-				phone: phone, 
-				email: email, 
-				address: address, 
-				income: income, 
-				nric: nric, 
-				passport: passport, 
-				verified: salah
-			};
-			<User<T>>::insert(&caller, thing);
-			Ok(())
-		}		
-
-		#[weight = 10_000]
-		fn validate_information(origin, account: AccountIdOf<T>) -> DispatchResult {
-			let caller = ensure_signed(origin)?;
-			let existing_information = <User<T>>::get(&account);
-			
-			let benar: bool = true;
-			let thing = PersonalInformation {
-				name: existing_information.clone().unwrap().name,
-				phone: existing_information.clone().unwrap().phone,
-				email: existing_information.clone().unwrap().email,
-				address: existing_information.clone().unwrap().address,
-				income: existing_information.clone().unwrap().income,
-				nric: existing_information.clone().unwrap().nric,
-				passport: existing_information.clone().unwrap().passport,
-				verified: benar
-			};
-			<User<T>>::insert(&account, thing);
-			let mut users = <Users<T>>::get();
-			let index = users.len();
-			users.insert(index, account);
-			<Users<T>>::put(users);
-
-			Ok(())
-		}			
-	
-		
-		#[weight = 10_000]
-		fn add_checker(origin, checker: AccountIdOf<T>) {
+		fn add_checker(origin, new_checker: AccountIdOf<T>) -> DispatchResult {
 			let _ = ensure_root(origin);
-			<Checker<T>>::insert(checker, true)					
+			<IsChecker<T>>::insert(&new_checker, true);
+			
+			let mut checkers = Checkers::<T>::get();
+		
+			match checkers.binary_search(&new_checker) {
+				Ok(_) => Ok(()),
+				Err(index) => {
+					checkers.insert(index, new_checker.clone());
+					Checkers::<T>::put(checkers);
+					Self::deposit_event(RawEvent::CheckerAdded(new_checker));
+					Ok(())
+				}
+			}			
 		}	
 		
 		#[weight = 10_000]
-		fn remove_checker(origin, checker: AccountIdOf<T>) {
+		fn remove_checker(origin, old_checker: AccountIdOf<T>) -> DispatchResult {
 			let _ = ensure_root(origin);
-			<Checker<T>>::insert(checker, false);					
+			<IsChecker<T>>::insert(&old_checker, false);		
+			
+			let mut checkers = Checkers::<T>::get();
+
+			match checkers.binary_search(&old_checker) {
+
+				Ok(index) => {
+					checkers.remove(index);
+					Checkers::<T>::put(checkers);
+					Self::deposit_event(RawEvent::CheckerRemoved(old_checker));
+					Ok(())
+				},
+				Err(_) => Ok(()),
+			}			
+		}		
+		
+		#[weight = 10_000]
+		fn add_user(origin, user: AccountIdOf<T>) -> DispatchResult {
+			let _ = ensure_root(origin);
+			<IsUser<T>>::insert(&user, true);
+			
+			let mut users = Users::<T>::get();
+		
+			match users.binary_search(&user) {
+				Ok(_) => Ok(()),
+				Err(index) => {
+					users.insert(index, user.clone());
+					Users::<T>::put(users);
+					Self::deposit_event(RawEvent::UserAdded(user));
+					Ok(())
+				}
+			}				
+		}	
+		
+		#[weight = 10_000]
+		fn update_user(origin, user: AccountIdOf<T>, level: u8) -> DispatchResult {
+			let caller = ensure_signed(origin)?;
+
+			let checkers = Checkers::<T>::get();
+
+			match checkers.binary_search(&caller) {
+
+				Ok(_index) => {
+
+					let users = Users::<T>::get();
+
+					match users.binary_search(&user) {
+		
+						Ok(_index) => {	
+							Level::<T>::insert(&user, &level);									
+							Self::deposit_event(RawEvent::UserVerified(user, level));
+							Ok(())
+						},
+						Err(_) => Ok(()),
+					}	
+					
+
+				},
+				Err(_) => Ok(()),
+			}					
+
+			
 		}			
 
 
 	}
 }
 
-impl<T: Trait> Module<T> {
-
-	// pub fn get_information(who: AccountIdOf<T>, what: Vec<u8>) -> () {
-	// }
-
-	// pub fn set_information(who: AccountIdOf<T>, what: Vec<u8>) -> () {
-	// }
-}
+impl<T: Trait> Module<T> {}
